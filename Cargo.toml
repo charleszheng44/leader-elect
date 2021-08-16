@@ -1,0 +1,20 @@
+[package]
+name = "leader-elect"
+version = "0.1.0"
+authors = ["admin"]
+edition = "2018"
+
+[[bin]]
+name="bully-proc"
+path="src/bully/main.rs"
+
+[[bin]]
+name="ring-proc"
+path="src/ring/main.rs"
+
+[dependencies]
+log = "0.4"
+colored = "2.0.0"
+clap = "3.0.0-beta.2"
+chrono = "0.4.19"
+derive_more = "0.99.16"
