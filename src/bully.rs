@@ -1,9 +1,9 @@
 use crate::error::{LeaderElectError, ThreadSafeResult};
-use crate::message::Message;
+use crate::message::{self, Message};
 use clap::{AppSettings, Clap};
 use log::{debug, info};
 use std::io;
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::net::{SocketAddrV4, TcpListener, TcpStream};
 use std::sync::mpsc;
 use std::thread;
@@ -12,8 +12,7 @@ use std::time::Duration;
 const RETRY: u8 = 10;
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-/// This doc string acts as a help message when the user runs '--help'
-/// as do all doc strings on fields
+/// Run a node for leader election using the bully algorithm.
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Charles Zheng. <charleszheng44@gmail.com>")]
 #[clap(setting = AppSettings::ColoredHelp)]
@@ -37,7 +36,7 @@ pub fn run(opts: &Opts) -> ThreadSafeResult<()> {
     let mut node = Node::new(opts.id, &opts.peers, &opts.advertise_address)?;
     debug!("node({}) initialized", node.id);
 
-    // 2. listen at the advertise address
+    // 2. listen on the advertise address
     let (sender, receiver) = mpsc::channel();
     let addr = node.advertise_address.clone();
     let message_receiver = thread::spawn(move || receive_messages(addr, sender));
@@ -89,22 +88,9 @@ fn process_message(receiver: mpsc::Receiver<Message>) -> ThreadSafeResult<()> {
 fn read_message(conn: TcpStream, sender: mpsc::Sender<Message>) -> ThreadSafeResult<()> {
     let mut buf_rd = BufReader::new(conn);
     loop {
-        let mut msg_str = String::new();
-        let num_bytes = buf_rd.read_line(&mut msg_str)?;
-        debug!("read line {}", msg_str);
-        if num_bytes == 0 {
-            return Err(new_box_err!("0 bytes read".to_owned()));
-        }
-        let message = gen_message_from_str(&msg_str)?;
-        debug!("receive message {}", message);
-        sender.send(message)?;
+        let msg = message::receive_message(&mut buf_rd)?;
+        sender.send(msg)?;
     }
-}
-
-/// gen_message_from_str deseiralizes Message from the given string slice.
-/// message format: <sender_id>:<MessageType>
-fn gen_message_from_str(msg_str: &str) -> ThreadSafeResult<Message> {
-    Ok(msg_str.trim().parse()?)
 }
 
 /// connect connects to the `address` and return a TcpStream on success.
@@ -127,7 +113,7 @@ fn connect(address: SocketAddrV4) -> ThreadSafeResult<TcpStream> {
 }
 
 #[derive(Debug)]
-struct Node {
+pub struct Node {
     id: u8,
     advertise_address: SocketAddrV4,
     peers: Vec<Peer>,
@@ -135,24 +121,25 @@ struct Node {
 }
 
 #[derive(Debug)]
-struct Peer {
+pub struct Peer {
     id: u8,
     address: SocketAddrV4,
     conn: Option<TcpStream>,
 }
 
 impl Node {
-    fn new(id: u8, peer_str: &str, advertise_address: &str) -> ThreadSafeResult<Node> {
+    pub fn new(id: u8, peer_str: &str, advertise_address: &str) -> ThreadSafeResult<Node> {
         Ok(Node {
             id,
             advertise_address: advertise_address.parse()?,
-            peers: parse_peer_str(peer_str.to_owned())?,
+            peers: parse_peer_opt(peer_str.to_owned())?,
             leader: None,
         })
     }
 }
 
-fn parse_peer_str(peer_str: String) -> ThreadSafeResult<Vec<Peer>> {
+/// parse_peer_opt parses the value of the command line options `peers`
+fn parse_peer_opt(peer_str: String) -> ThreadSafeResult<Vec<Peer>> {
     let mut peers = vec![];
     for pair in peer_str.split(',') {
         let mut id_addr_pair = pair.split("=");
