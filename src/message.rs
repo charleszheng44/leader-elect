@@ -3,14 +3,24 @@ use derive_more::Display;
 use std::io::{BufRead, Write};
 use std::str::FromStr;
 
-#[derive(Display, Debug, PartialEq)]
-enum MessageType {
+#[derive(Display, Debug, PartialEq, Copy, Clone)]
+pub enum MessageType {
     #[display(fmt = "HeartBeat")]
     HeartBeat = 0,
     #[display(fmt = "Elect")]
     Elect,
-    #[display(fmt = "Acknowledge")]
-    Acknowledge,
+    #[display(fmt = "Alive")]
+    Alive,
+    #[display(fmt = "Victory")]
+    Victory,
+}
+
+#[derive(Display, Debug)]
+pub enum ElectResponse {
+    #[display(fmt = "ResponseTimeOut")]
+    ResponseTimeOut = 0,
+    #[display(fmt = "BuillerAlive")]
+    BuillerAlive,
 }
 
 impl FromStr for MessageType {
@@ -20,7 +30,8 @@ impl FromStr for MessageType {
         match s {
             "0" => Ok(MessageType::HeartBeat),
             "1" => Ok(MessageType::Elect),
-            "2" => Ok(MessageType::Acknowledge),
+            "2" => Ok(MessageType::Alive),
+            "3" => Ok(MessageType::Victory),
             _ => Err(new_box_err!("fail to read message_type".to_owned())),
         }
     }
@@ -31,6 +42,19 @@ impl FromStr for MessageType {
 pub struct Message {
     message_type: MessageType,
     sender_id: u8,
+}
+
+impl Message {
+    pub fn new(sender_id: u8, message_type: MessageType) -> Message {
+        Message {
+            sender_id,
+            message_type,
+        }
+    }
+
+    pub fn get_message_type(&self) -> MessageType {
+        self.message_type
+    }
 }
 
 impl FromStr for Message {
@@ -50,11 +74,11 @@ impl FromStr for Message {
     }
 }
 
-fn str_to_message(inp_str: &str) -> ThreadSafeResult<Message> {
+pub fn str_to_message(inp_str: &str) -> ThreadSafeResult<Message> {
     inp_str.trim().parse()
 }
 
-fn message_to_str(msg: Message) -> String {
+pub fn message_to_str(msg: Message) -> String {
     format!("{}:{}", msg.sender_id, msg.message_type as u8)
 }
 
