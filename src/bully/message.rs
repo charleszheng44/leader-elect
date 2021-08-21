@@ -55,6 +55,10 @@ impl Message {
     pub fn get_message_type(&self) -> MessageType {
         self.message_type
     }
+
+    pub fn get_sender_id(&self) -> u8 {
+        self.sender_id
+    }
 }
 
 impl FromStr for Message {

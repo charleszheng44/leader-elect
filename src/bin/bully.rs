@@ -1,5 +1,5 @@
 use clap::Clap;
-use leader_elect::bully::{run, Opts};
+use leader_elect::bully::bully::{run, Opts};
 use leader_elect::error::ThreadSafeResult;
 use leader_elect::logger;
 

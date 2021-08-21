@@ -5,12 +5,12 @@ authors = ["admin"]
 edition = "2018"
 
 [[bin]]
-name="bully-proc"
-path="src/bully/main.rs"
+name="ring"
+path="src/bin/ring.rs"
 
 [[bin]]
-name="ring-proc"
-path="src/ring/main.rs"
+name="bully"
+path="src/bin/bully.rs"
 
 [dependencies]
 log = "0.4"
@@ -18,4 +18,3 @@ colored = "2.0.0"
 clap = "3.0.0-beta.2"
 chrono = "0.4.19"
 derive_more = "0.99.16"
-scopeguard = "1.1.0"

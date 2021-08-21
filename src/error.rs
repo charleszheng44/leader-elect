@@ -23,6 +23,6 @@ impl Error for LeaderElectError {}
 
 macro_rules! new_box_err {
     ($err_str:expr) => {
-        Box::new(LeaderElectError::new($err_str));
+        Box::new(LeaderElectError::new($err_str))
     };
 }

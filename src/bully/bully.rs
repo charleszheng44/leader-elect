@@ -1,21 +1,19 @@
+use crate::bully::consts::*;
+use crate::bully::message::{
+    self, ElectResponse, Message,
+    MessageType::{self, *},
+};
 use crate::error::{LeaderElectError, ThreadSafeResult};
-use crate::message::{self, ElectResponse, Message, MessageType};
 use clap::{AppSettings, Clap};
 use derive_more::Display;
-use log::{debug, error, info};
+use log::{debug, error, info, trace};
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::net::{SocketAddrV4, TcpListener, TcpStream};
 use std::process;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::{Duration, SystemTime};
-
-const RETRY: u8 = 10;
-const INIT_CONN_TIMEOUT: Duration = Duration::from_secs(10);
-const ALIVE_TIMEOUT: Duration = Duration::from_secs(1);
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
-const LEADER_CHECK_INTERVAL: Duration = Duration::from_secs(3);
+use std::time::SystemTime;
 
 /// Run a node for leader election using the bully algorithm.
 #[derive(Clap)]
@@ -177,11 +175,15 @@ fn send_message(sender_id: u8, peer: &mut Peer, message_type: MessageType) -> Th
     let msg = Message::new(sender_id, message_type);
     debug!("send message {}", msg);
     if let Some(conn) = peer.conn.as_mut() {
-        return Ok(conn.write_all(message::message_to_str(msg).as_bytes())?);
+        return send_message_through_conn(msg, conn);
     }
     Err(new_box_err!(
         "try to send message through nonexist connection".to_owned()
     ))
+}
+
+fn send_message_through_conn(msg: Message, conn: &mut TcpStream) -> ThreadSafeResult<()> {
+    Ok(conn.write_all(message::message_to_str(msg).as_bytes())?)
 }
 
 /// send_elect_message sends `Elect` message to the given peer and waits for
@@ -239,19 +241,74 @@ fn listen_and_serve(arc_rw_node: Arc<RwLock<Node>>) -> ThreadSafeResult<()> {
         listener = TcpListener::bind(adr)?;
     }
     loop {
-        let (conn, addr) = listener.accept()?;
+        let (mut conn, addr) = listener.accept()?;
+        let node_clone = arc_rw_node.clone();
         info!("accept connection from {}", addr);
-        thread::spawn(move || handle_message(conn));
+        thread::spawn(move || handle_message(node_clone, &mut conn));
     }
 }
 
 /// handle_message keeps reading messages from the conn and handling
 /// them accordingly.
-fn handle_message(conn: TcpStream) -> ThreadSafeResult<()> {
+fn handle_message(arc_rw_node: Arc<RwLock<Node>>, conn: &mut TcpStream) -> ThreadSafeResult<()> {
     let mut buf_rd = BufReader::new(conn);
     loop {
-        let _msg = message::receive_message(&mut buf_rd)?;
-        // TODO handle message
+        let msg = message::receive_message(&mut buf_rd)?;
+        match msg.get_message_type() {
+            MessageType::Elect => {
+                // reply alive
+                let mut node = arc_rw_node.write().unwrap();
+                send_message_through_conn(Message::new(node.id, Alive), buf_rd.get_mut())?;
+                // continue the election
+                if let ElectionResult::Win = elect(&mut node)? {
+                    // won the election, announce self as the leader
+                    node.leader = Some(node.id);
+                    announce_victory(&mut node)?;
+                }
+                // else do nothing
+            }
+
+            MessageType::Victory => {
+                let mut node = arc_rw_node.write().unwrap();
+                let sender_id = msg.get_sender_id();
+                if sender_id < node.id {
+                    return Err(
+                        new_box_err!(format!(
+                                "Victory message sent from peer with id({}) smaller than the current node({})", 
+                                sender_id, node.id)));
+                }
+                info!("peer({}) is the leader", sender_id);
+                node.leader = Some(sender_id);
+                node.last_leader_heartbeat = Some(SystemTime::now());
+            }
+
+            MessageType::HeartBeat => {
+                let mut node = arc_rw_node.write().unwrap();
+                let sender_id = msg.get_sender_id();
+                match node.leader {
+                    Some(id) if id == sender_id => {
+                        trace!("receive heartbeat from leader({})", id);
+                        node.last_leader_heartbeat = Some(SystemTime::now())
+                    }
+                    // ignore the heartbeat if the sender is not the leader
+                    Some(id) => debug!(
+                        "receive heartbeat from peer({}), which is not the leader({})",
+                        sender_id, id
+                    ),
+                    // ignore the heartbeat if the leader is not set
+                    None => debug!(
+                        "receive heartbeat from peer({}), but the leader is not set",
+                        sender_id
+                    ),
+                }
+            }
+            wrong_type @ _ => {
+                return Err(new_box_err!(format!(
+                    "unsupported message type {}",
+                    wrong_type
+                )));
+            }
+        }
     }
 }
 
